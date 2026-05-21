@@ -6,7 +6,7 @@ already routes:
 
 - **Metrics** → Prometheus (`obs-prometheus`)
 - **Logs**    → Loki (`obs-loki`)
-- **Traces**  → Langfuse (separate plugin handles this)
+- **Traces**  → forwarded if a trace backend is wired in the collector pipeline (no default backend; Grafana Tempo is a natural fit)
 
 All visualized in Grafana (`http://localhost:3002`).
 
