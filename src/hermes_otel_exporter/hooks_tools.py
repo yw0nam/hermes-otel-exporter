@@ -16,7 +16,7 @@ def on_pre_tool_call(*, tool_name: str = "", args: Any = None, task_id: str = ""
     parent_span = None
     with r.STATE_LOCK:
         if _TRACE_AVAILABLE and session_id in r.SESSION_SPANS:
-            parent_span = r.SESSION_SPANS[session_id][0]
+            parent_span = r.SESSION_SPANS[session_id]
         if tool_call_id:
             r.TOOL_START_TS[f"{base}::{tool_call_id}"] = now
         else:
@@ -42,10 +42,10 @@ def on_pre_tool_call(*, tool_name: str = "", args: Any = None, task_id: str = ""
         elif tool_name in ("Write", "Edit", "Read", "Glob", "Grep"):
             span_attrs["file_path"] = str(args.get("filePath", args.get("path", "")))[:8192] if isinstance(args, dict) else ""
 
-        span_ctx = start_tool_span(tool_name, parent=parent_span, **span_attrs)
-        span = span_ctx.__enter__()
-        with r.STATE_LOCK:
-            r.TOOL_SPANS[tool_call_id or f"{base}::{tool_name}"] = (span, span_ctx)
+        span = start_tool_span(tool_name, parent=parent_span, **span_attrs)
+        if span is not None:
+            with r.STATE_LOCK:
+                r.TOOL_SPANS[tool_call_id or f"{base}::{tool_name}"] = span
 
     arg_size = r.payload_size(args)
     if arg_size:
@@ -60,19 +60,17 @@ def on_post_tool_call(*, tool_name: str = "", result: Any = None,
     base = r.key_for(task_id, session_id)
     started = None
     span = None
-    span_ctx = None
     with r.STATE_LOCK:
         if _TRACE_AVAILABLE:
             span_key = tool_call_id or f"{base}::{tool_name}"
-            span_data = r.TOOL_SPANS.pop(span_key, None)
-            if not span_data and not tool_call_id:
+            span = r.TOOL_SPANS.pop(span_key, None)
+            if span is None and not tool_call_id:
                 for k in list(r.TOOL_SPANS):
                     if k.startswith(f"{base}::") and tool_name in k:
-                        span_data = r.TOOL_SPANS.pop(k)
+                        span = r.TOOL_SPANS.pop(k)
                         break
-            if span_data:
-                span, span_ctx = span_data
-                
+
+
         if tool_call_id:
             started = r.TOOL_START_TS.pop(f"{base}::{tool_call_id}", None)
         if started is None:
@@ -146,7 +144,10 @@ def on_post_tool_call(*, tool_name: str = "", result: Any = None,
                 set_span_error(span, error if isinstance(error, BaseException) else Exception(str(error)))
         except Exception:
             pass
-        span_ctx.__exit__(None, None, None)
+        try:
+            span.end()
+        except Exception:
+            pass
 
 
 def on_transform_tool_result(*, tool_name: str = "", result: Any = None,

@@ -27,12 +27,12 @@ def on_pre_api_request(*, task_id: str = "", session_id: str = "",
     parent_span = None
     with r.STATE_LOCK:
         if _TRACE_AVAILABLE and session_id in r.SESSION_SPANS:
-            parent_span = r.SESSION_SPANS[session_id][0]
+            parent_span = r.SESSION_SPANS[session_id]
         r.LLM_START_TS[key] = time.monotonic()
         r.SESSION_API_CALLS[r.key_for(task_id, session_id)] += 1
 
     if _TRACE_AVAILABLE:
-        span_ctx = start_llm_span(
+        span = start_llm_span(
             model=model or "unknown",
             provider=provider or "unknown",
             parent=parent_span,
@@ -41,9 +41,9 @@ def on_pre_api_request(*, task_id: str = "", session_id: str = "",
                 "ai.prompt.messages": approx_input_tokens or message_count,
             }
         )
-        span = span_ctx.__enter__()
-        with r.STATE_LOCK:
-            r.LLM_SPANS[key] = (span, span_ctx)
+        if span is not None:
+            with r.STATE_LOCK:
+                r.LLM_SPANS[key] = span
 
     attrs = r.session_attrs(
         session_id,
@@ -110,12 +110,9 @@ def _record_llm(*, task_id: str = "", session_id: str = "",
                 **_: Any) -> None:
     key = f"{r.key_for(task_id, session_id)}::{api_call_count}"
     span = None
-    span_ctx = None
     with r.STATE_LOCK:
         if _TRACE_AVAILABLE:
-            span_data = r.LLM_SPANS.pop(key, None)
-            if span_data:
-                span, span_ctx = span_data
+            span = r.LLM_SPANS.pop(key, None)
         started = r.LLM_START_TS.pop(key, None)
 
     attrs = r.session_attrs(
@@ -210,7 +207,10 @@ def _record_llm(*, task_id: str = "", session_id: str = "",
                 set_span_error(span, error if isinstance(error, BaseException) else Exception(str(error)))
         except Exception:
             pass
-        span_ctx.__exit__(None, None, None)
+        try:
+            span.end()
+        except Exception:
+            pass
 
 
 def on_post_llm_call(**kwargs: Any) -> None:

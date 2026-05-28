@@ -12,13 +12,12 @@ from .tracing import _TRACE_AVAILABLE, set_span_error
 
 def on_session_start(*, session_id: str = "", task_id: str = "",
                      platform: str = "", **_: Any) -> None:
-    span_ctx = None
     if _TRACE_AVAILABLE:
         from .tracing import start_session_span
-        span_ctx = start_session_span(session_id, platform or "cli", task_id=task_id)
-        span = span_ctx.__enter__()
-        with r.STATE_LOCK:
-            r.SESSION_SPANS[session_id] = (span, span_ctx)
+        span = start_session_span(session_id, platform or "cli", task_id=task_id)
+        if span is not None:
+            with r.STATE_LOCK:
+                r.SESSION_SPANS[session_id] = span
     r.init()
     key = r.key_for(task_id, session_id)
     with r.STATE_LOCK:
@@ -40,12 +39,9 @@ def on_session_end(*, session_id: str = "", task_id: str = "",
                    platform: str = "", reason: str = "", **_: Any) -> None:
     key = r.key_for(task_id, session_id)
     span = None
-    span_ctx = None
     with r.STATE_LOCK:
         if _TRACE_AVAILABLE:
-            span_data = r.SESSION_SPANS.pop(session_id, None)
-            if span_data:
-                span, span_ctx = span_data
+            span = r.SESSION_SPANS.pop(session_id, None)
         started = r.SESSION_START_TS.pop(key, None)
         api_calls = r.SESSION_API_CALLS.pop(key, 0)
         turns = r.SESSION_TURNS.pop(key, 0)
@@ -101,7 +97,10 @@ def on_session_end(*, session_id: str = "", task_id: str = "",
                 set_span_error(span, Exception(reason))
         except Exception:
             pass
-        span_ctx.__exit__(None, None, None)
+        try:
+            span.end()
+        except Exception:
+            pass
 
 
 # ---- approval -------------------------------------------------------------

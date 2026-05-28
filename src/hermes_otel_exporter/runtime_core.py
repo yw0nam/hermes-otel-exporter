@@ -27,6 +27,27 @@ _INIT_DONE = False
 _INIT_FAILED = False
 _LOG_HANDLER: Optional[logging.Handler] = None
 
+
+class _EventLogger:
+    """Structured event logger bridged to OTel via the LoggingHandler.
+    
+    Hooks call ``r.event_logger.info(msg, extra=attrs)`` and 
+    ``r.event_logger.error(msg, extra=attrs)``.  The extra dict keys become
+    LogRecord attributes, which the OTel LoggingHandler forwards as OTel
+    log-record attributes.
+    """
+    def __init__(self) -> None:
+        self._logger = logging.getLogger("hermes.agent.events")
+
+    def info(self, msg: str, extra: dict | None = None, **kwargs: Any) -> None:
+        self._logger.info(msg, extra=extra or {})
+
+    def error(self, msg: str, extra: dict | None = None, **kwargs: Any) -> None:
+        self._logger.error(msg, extra=extra or {})
+
+
+event_logger = _EventLogger()
+
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
@@ -118,7 +139,7 @@ def init() -> bool:
                 _LOG_HANDLER.setFormatter(RedactingFormatter("%(message)s"))
             except Exception as exc:
                 logger.warning("hermes-otel-exporter: RedactingFormatter unavailable")
-            for name in ("hermes", "agent", "gateway", "model_tools", "run_agent", "hermes_logging"):
+            for name in ("hermes", "agent", "gateway", "model_tools", "run_agent", "hermes_logging", "hermes.agent.events"):
                 logging.getLogger(name).addHandler(_LOG_HANDLER)
 
             from .tracing import init_tracing

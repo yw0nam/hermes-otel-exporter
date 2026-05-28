@@ -9,6 +9,7 @@ from .runtime_core import (
     _INIT_DONE,
     _INIT_FAILED,
     _LOG_HANDLER,
+    event_logger,
 )
 
 from .metrics_setup import (
